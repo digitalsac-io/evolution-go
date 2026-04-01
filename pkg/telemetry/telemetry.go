@@ -3,12 +3,27 @@ package telemetry
 import (
 	"bytes"
 	"encoding/json"
-	"log"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+var telemetryHTTPClient = &http.Client{Timeout: 5 * time.Second}
+
+func telemetryURL() string {
+	return strings.TrimSpace(os.Getenv("TELEMETRY_URL"))
+}
+
+// isTelemetryEnabled is true only when TELEMETRY_ENABLED=true and TELEMETRY_URL is non-empty.
+func isTelemetryEnabled() bool {
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("TELEMETRY_ENABLED")), "true") {
+		return false
+	}
+	return telemetryURL() != ""
+}
 
 type TelemetryData struct {
 	Route      string    `json:"route"`
@@ -20,6 +35,10 @@ type telemetryService struct{}
 
 func (t *telemetryService) TelemetryMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !isTelemetryEnabled() {
+			c.Next()
+			return
+		}
 		route := c.FullPath()
 		go SendTelemetry(route)
 		c.Next()
@@ -31,7 +50,7 @@ type TelemetryService interface {
 }
 
 func SendTelemetry(route string) {
-	if route == "/" {
+	if !isTelemetryEnabled() || route == "/" {
 		return
 	}
 
@@ -41,17 +60,20 @@ func SendTelemetry(route string) {
 		Timestamp:  time.Now(),
 	}
 
-	url := "https://log.evolution-api.com/telemetry"
-
+	url := telemetryURL()
 	data, err := json.Marshal(telemetry)
 	if err != nil {
-		log.Println("Erro ao serializar telemetria:", err)
 		return
 	}
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(data))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
 	if err != nil {
-		log.Println("Erro ao enviar telemetria:", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := telemetryHTTPClient.Do(req)
+	if err != nil {
 		return
 	}
 	defer resp.Body.Close()

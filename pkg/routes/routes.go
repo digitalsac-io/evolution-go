@@ -8,6 +8,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 
 	_ "github.com/EvolutionAPI/evolution-go/docs"
+	zuck_compat "github.com/EvolutionAPI/evolution-go/pkg/compat/zuckzapgo"
 	call_handler "github.com/EvolutionAPI/evolution-go/pkg/call/handler"
 	chat_handler "github.com/EvolutionAPI/evolution-go/pkg/chat/handler"
 	community_handler "github.com/EvolutionAPI/evolution-go/pkg/community/handler"
@@ -38,6 +39,7 @@ type Routes struct {
 	newsletterHandler       newsletter_handler.NewsletterHandler
 	pollHandler             *poll_handler.PollHandler
 	serverHandler           server_handler.ServerHandler
+	zuckCompatHandler       zuck_compat.ZuckCompatHandler
 }
 
 func (r *Routes) AssignRoutes(eng *gin.Engine) {
@@ -121,6 +123,7 @@ func (r *Routes) AssignRoutes(eng *gin.Engine) {
 			routes.POST("/contact", r.jidValidationMiddleware.ValidateContactFields(), r.sendHandler.SendContact) // TODO: send multiple contacts
 			routes.POST("/button", r.jidValidationMiddleware.ValidateNumberFieldWithFormatJid(), r.sendHandler.SendButton)
 			routes.POST("/list", r.jidValidationMiddleware.ValidateNumberFieldWithFormatJid(), r.sendHandler.SendList)
+			routes.POST("/carousel", r.jidValidationMiddleware.ValidateNumberFieldWithFormatJid(), r.sendHandler.SendCarousel)
 			// TODO: send status
 		}
 	}
@@ -166,6 +169,23 @@ func (r *Routes) AssignRoutes(eng *gin.Engine) {
 			routes.POST("/mute", r.jidValidationMiddleware.ValidateNumberField(), r.chatHandler.ChatMute)           // TODO: not working
 			routes.POST("/unmute", r.jidValidationMiddleware.ValidateNumberField(), r.chatHandler.ChatUnmute)       // TODO: not working
 			routes.POST("/history-sync", r.chatHandler.HistorySyncRequest)
+
+			// ZuckZapGo-compatible send endpoints (payload com "phone" ou "number")
+			zuck := routes.Group("/send")
+			{
+				zuck.POST("/text", r.jidValidationMiddleware.ValidatePhoneOrNumberFieldWithFormatJid(), r.zuckCompatHandler.SendTextCompat)
+				zuck.POST("/image", r.jidValidationMiddleware.ValidatePhoneOrNumberFieldWithFormatJid(), r.zuckCompatHandler.SendImageCompat)
+				zuck.POST("/audio", r.jidValidationMiddleware.ValidatePhoneOrNumberFieldWithFormatJid(), r.zuckCompatHandler.SendAudioCompat)
+				zuck.POST("/document", r.jidValidationMiddleware.ValidatePhoneOrNumberFieldWithFormatJid(), r.zuckCompatHandler.SendDocumentCompat)
+				zuck.POST("/video", r.jidValidationMiddleware.ValidatePhoneOrNumberFieldWithFormatJid(), r.zuckCompatHandler.SendVideoCompat)
+				zuck.POST("/ptv", r.jidValidationMiddleware.ValidatePhoneOrNumberFieldWithFormatJid(), r.zuckCompatHandler.SendPTVCompat)
+				zuck.POST("/sticker", r.jidValidationMiddleware.ValidatePhoneOrNumberFieldWithFormatJid(), r.zuckCompatHandler.SendStickerCompat)
+				zuck.POST("/location", r.jidValidationMiddleware.ValidatePhoneOrNumberFieldWithFormatJid(), r.zuckCompatHandler.SendLocationCompat)
+				zuck.POST("/contact", r.jidValidationMiddleware.ValidatePhoneOrNumberContactFields(), r.zuckCompatHandler.SendContactCompat)
+				zuck.POST("/list", r.jidValidationMiddleware.ValidatePhoneOrNumberFieldWithFormatJid(), r.zuckCompatHandler.SendListCompat)
+				zuck.POST("/buttons", r.jidValidationMiddleware.ValidatePhoneOrNumberFieldWithFormatJid(), r.zuckCompatHandler.SendButtonsCompat)
+				zuck.POST("/carousel", r.jidValidationMiddleware.ValidatePhoneOrNumberFieldWithFormatJid(), r.zuckCompatHandler.SendCarouselCompat)
+			}
 		}
 	}
 	routes = eng.Group("/group")
@@ -257,6 +277,7 @@ func NewRouter(
 	newsletterHandler newsletter_handler.NewsletterHandler,
 	pollHandler *poll_handler.PollHandler,
 	serverHandler server_handler.ServerHandler,
+	zuckCompatHandler zuck_compat.ZuckCompatHandler,
 ) *Routes {
 	return &Routes{
 		authMiddleware:          authMiddleware,
@@ -273,5 +294,6 @@ func NewRouter(
 		newsletterHandler:       newsletterHandler,
 		pollHandler:             pollHandler,
 		serverHandler:           serverHandler,
+		zuckCompatHandler:       zuckCompatHandler,
 	}
 }

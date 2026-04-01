@@ -53,6 +53,7 @@ import (
 	newsletter_handler "github.com/EvolutionAPI/evolution-go/pkg/newsletter/handler"
 	newsletter_service "github.com/EvolutionAPI/evolution-go/pkg/newsletter/service"
 	poll_handler "github.com/EvolutionAPI/evolution-go/pkg/poll/handler"
+	zuck_compat "github.com/EvolutionAPI/evolution-go/pkg/compat/zuckzapgo"
 	routes "github.com/EvolutionAPI/evolution-go/pkg/routes"
 	send_handler "github.com/EvolutionAPI/evolution-go/pkg/sendMessage/handler"
 	send_service "github.com/EvolutionAPI/evolution-go/pkg/sendMessage/service"
@@ -239,6 +240,7 @@ func setupRouter(db *gorm.DB, authDB *sql.DB, sqliteDB *sql.DB, config *config.C
 		newsletter_handler.NewNewsletterHandler(newsletterService),
 		pollHandler,
 		server_handler.NewServerHandler(),
+		zuck_compat.NewZuckCompatHandler(sendMessageService),
 	).AssignRoutes(r)
 
 	if config.ConnectOnStartup {
@@ -329,6 +331,8 @@ func initPostgresAuthDB(config *config.Config) (*sql.DB, error) {
 // @title Evolution GO
 // @version 1.0
 // @description Evolution GO - whatsmeow
+// @tag.name ZuckZapGo compat
+// @tag.description Endpoints em /chat/send/* com payloads estilo ZuckZapGo (campo phone, aliases de texto/mídia). Reutilizam os mesmos serviços de envio da API nativa.
 func main() {
 	flag.Parse()
 	if *devMode {
@@ -374,6 +378,7 @@ func main() {
 	if err := core.MigrateDB(); err != nil {
 		log.Fatal("Failed to migrate runtime_configs: ", err)
 	}
+	// LICENSE_MODE default: disabled (local/open-source, no remote license HTTP). TELEMETRY_ENABLED default: false.
 	tier := "evolution-go"
 	runtimeCtx := core.InitializeRuntime(tier, version, cfg.GlobalApiKey)
 

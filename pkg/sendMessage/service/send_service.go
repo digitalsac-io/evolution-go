@@ -43,6 +43,7 @@ type SendService interface {
 	SendContact(data *ContactStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendButton(data *ButtonStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendList(data *ListStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
+	SendCarousel(data *CarouselStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 }
 
 type sendService struct {
@@ -1455,6 +1456,20 @@ func (s *sendService) SendSticker(data *StickerStruct, instance *instance_model.
 
 		filedata = webpData
 
+		uploaded, err = client.Upload(context.Background(), filedata, whatsmeow.MediaImage)
+		if err != nil {
+			return nil, fmt.Errorf("failed to upload sticker: %v", err)
+		}
+	} else if strings.HasPrefix(data.Sticker, "data:") {
+		comma := strings.Index(data.Sticker, ",")
+		if comma < 0 {
+			return nil, fmt.Errorf("invalid sticker data URL")
+		}
+		raw, err := base64.StdEncoding.DecodeString(data.Sticker[comma+1:])
+		if err != nil {
+			return nil, fmt.Errorf("invalid sticker base64: %v", err)
+		}
+		filedata = raw
 		uploaded, err = client.Upload(context.Background(), filedata, whatsmeow.MediaImage)
 		if err != nil {
 			return nil, fmt.Errorf("failed to upload sticker: %v", err)

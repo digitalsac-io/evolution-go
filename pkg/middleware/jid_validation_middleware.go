@@ -448,6 +448,109 @@ func (m *JIDValidationMiddleware) ValidateNumberFieldWithFormatJid() gin.Handler
 	}
 }
 
+// ValidatePhoneOrNumberFieldWithFormatJid copies JSON field "phone" into "number" when "number" is absent,
+// then applies the same rules as ValidateNumberFieldWithFormatJid. Use for ZuckZapGo-compatible payloads.
+func (m *JIDValidationMiddleware) ValidatePhoneOrNumberFieldWithFormatJid() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		contentType := c.ContentType()
+		if !strings.Contains(contentType, "application/json") {
+			c.Next()
+			return
+		}
+
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+			c.Abort()
+			return
+		}
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+
+		var requestData map[string]interface{}
+		if err := json.Unmarshal(body, &requestData); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON format"})
+			c.Abort()
+			return
+		}
+
+		if _, hasNumber := requestData["number"]; !hasNumber {
+			if phoneVal, hasPhone := requestData["phone"]; hasPhone {
+				if phoneStr, ok := phoneVal.(string); ok && phoneStr != "" {
+					requestData["number"] = phoneStr
+				}
+			}
+		}
+		if _, hasNumber := requestData["number"]; !hasNumber {
+			if phoneVal, has := requestData["Phone"]; has {
+				if phoneStr, ok := phoneVal.(string); ok && phoneStr != "" {
+					requestData["number"] = phoneStr
+				}
+			}
+		}
+
+		newBody, err := json.Marshal(requestData)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process request"})
+			c.Abort()
+			return
+		}
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(newBody))
+
+		m.ValidateNumberFieldWithFormatJid()(c)
+	}
+}
+
+// ValidatePhoneOrNumberContactFields aliases "phone" into "number" when needed, then runs ValidateContactFields.
+func (m *JIDValidationMiddleware) ValidatePhoneOrNumberContactFields() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		contentType := c.ContentType()
+		if !strings.Contains(contentType, "application/json") {
+			c.Next()
+			return
+		}
+
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+			c.Abort()
+			return
+		}
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+
+		var requestData map[string]interface{}
+		if err := json.Unmarshal(body, &requestData); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON format"})
+			c.Abort()
+			return
+		}
+
+		if _, hasNumber := requestData["number"]; !hasNumber {
+			if phoneVal, hasPhone := requestData["phone"]; hasPhone {
+				if phoneStr, ok := phoneVal.(string); ok && phoneStr != "" {
+					requestData["number"] = phoneStr
+				}
+			}
+		}
+		if _, hasNumber := requestData["number"]; !hasNumber {
+			if phoneVal, has := requestData["Phone"]; has {
+				if phoneStr, ok := phoneVal.(string); ok && phoneStr != "" {
+					requestData["number"] = phoneStr
+				}
+			}
+		}
+
+		newBody, err := json.Marshal(requestData)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process request"})
+			c.Abort()
+			return
+		}
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(newBody))
+
+		m.ValidateContactFields()(c)
+	}
+}
+
 // ValidateContactFields validates contact-specific fields that may contain phone numbers
 func (m *JIDValidationMiddleware) ValidateContactFields() gin.HandlerFunc {
 	return func(c *gin.Context) {

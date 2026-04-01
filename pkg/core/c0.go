@@ -24,6 +24,23 @@ import (
 	"time"
 )
 
+// isLicenseRemoteDisabled is the default: no remote license server, no blocking, no outbound license HTTP.
+// Remote licensing runs only when LICENSE_MODE is "remote" or "enabled", and LICENSE_ENABLED is not "false".
+func isLicenseRemoteDisabled() bool {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("LICENSE_ENABLED")), "false") {
+		return true
+	}
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("LICENSE_MODE")))
+	switch mode {
+	case "", "disabled":
+		return true
+	case "remote", "enabled":
+		return false
+	default:
+		return true
+	}
+}
+
 var _k1 = []byte{0x92, 0x8a, 0x16, 0xa6, 0xfe, 0xe4, 0x09, 0xeb, 0xf6, 0x25, 0xd6, 0xf3, 0x94, 0x0f, 0x76, 0xef, 0x38, 0x68, 0xe0, 0x52, 0x4e, 0xca, 0x54, 0x25, 0x4b, 0x93, 0x52, 0xc6, 0x5a, 0x59, 0x4e, 0x64, 0xa7, 0xce, 0x48, 0x22, 0x7f, 0x04, 0x3c, 0x59, 0x0e, 0x3b}
 var _k0 = []byte{0xfa, 0xfe, 0x62, 0xd6, 0x8d, 0xde, 0x26, 0xc4, 0x9a, 0x4c, 0xb5, 0x96, 0xfa, 0x7c, 0x13, 0xc1, 0x5d, 0x1e, 0x8f, 0x3e, 0x3b, 0xbe, 0x3d, 0x4a, 0x25, 0xf5, 0x3d, 0xb3, 0x34, 0x3d, 0x2f, 0x10, 0xce, 0xa1, 0x26, 0x0c, 0x1c, 0x6b, 0x51, 0x77, 0x6c, 0x49}
 
@@ -384,6 +401,8 @@ type RuntimeContext struct {
 	_s09     string // Registration token for polling
 	_y6         string
 	_h7      string
+	// _localOpenSource: LICENSE_MODE default disabled — no remote license calls, gate allows all routes.
+	_localOpenSource bool
 }
 
 func (rc *RuntimeContext) ContextHash() [32]byte {
@@ -421,9 +440,10 @@ func InitializeRuntime(_y6, _h7, _444 string) *RuntimeContext {
 	}
 
 	rc := &RuntimeContext{
-		_y6:         _y6,
-		_h7:      _h7,
-		_444: _444,
+		_y6:              _y6,
+		_h7:              _h7,
+		_444:             _444,
+		_localOpenSource: isLicenseRemoteDisabled(),
 	}
 
 	id, err := _viat()
@@ -431,6 +451,22 @@ func InitializeRuntime(_y6, _h7, _444 string) *RuntimeContext {
 		log.Fatalf("[runtime] failed to initialize instance: %v", err)
 	}
 	rc._645 = id
+
+	if rc._localOpenSource {
+		rc._jpwr = _444
+		if rc._jpwr == "" {
+			if rd, err := _8ftv(); err == nil && rd.APIKey != "" {
+				rc._jpwr = rd.APIKey
+			} else {
+				rc._jpwr = "local-" + rc._645
+			}
+		}
+		rc._uw = sha256.Sum256([]byte(rc._jpwr + rc._645))
+		rc._xk65.Store(true)
+		ActivateIntegrity(rc)
+		fmt.Println("  ✓ License mode: local / open-source (remote licensing disabled)")
+		return rc
+	}
 
 	rd, err := _8ftv()
 	if err == nil && rd.APIKey != "" {
@@ -481,6 +517,9 @@ func _p3() {
 }
 
 func (rc *RuntimeContext) _fbk(authCodeOrKey, _y6 string, customerID int) error {
+	if rc._localOpenSource {
+		return fmt.Errorf("remote license activation is disabled (LICENSE_MODE=disabled)")
+	}
 	_jpwr, err := _kc1(authCodeOrKey)
 	if err != nil {
 		return fmt.Errorf("key exchange failed: %w", err)
@@ -539,6 +578,12 @@ func ValidateContext(rc *RuntimeContext) (bool, string) {
 
 func GateMiddleware(rc *RuntimeContext) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if rc != nil && rc._localOpenSource {
+			c.Set("_rch", rc.ContextHash())
+			c.Next()
+			return
+		}
+
 		path := c.Request.URL.Path
 
 		if path == "/health" || path == "/server/ok" || path == "/favicon.ico" ||
@@ -579,6 +624,22 @@ func LicenseRoutes(eng *gin.Engine, rc *RuntimeContext) {
 	lic := eng.Group("/license")
 	{
 		lic.GET("/status", func(c *gin.Context) {
+			if rc._localOpenSource {
+				resp := gin.H{
+					"status":           "active",
+					"mode":             "disabled",
+					"license_required": false,
+					"instance_id":      rc._645,
+				}
+				rc.mu.RLock()
+				if rc._jpwr != "" && len(rc._jpwr) >= 12 {
+					resp["api_key"] = rc._jpwr[:8] + "..." + rc._jpwr[len(rc._jpwr)-4:]
+				}
+				rc.mu.RUnlock()
+				c.JSON(http.StatusOK, resp)
+				return
+			}
+
 			status := "inactive"
 			if rc.IsActive() {
 				status = "active"
@@ -590,7 +651,7 @@ func LicenseRoutes(eng *gin.Engine, rc *RuntimeContext) {
 			}
 
 			rc.mu.RLock()
-			if rc._jpwr != "" {
+			if rc._jpwr != "" && len(rc._jpwr) >= 12 {
 				resp["api_key"] = rc._jpwr[:8] + "..." + rc._jpwr[len(rc._jpwr)-4:]
 			}
 			rc.mu.RUnlock()
@@ -599,6 +660,15 @@ func LicenseRoutes(eng *gin.Engine, rc *RuntimeContext) {
 		})
 
 		lic.GET("/register", func(c *gin.Context) {
+			if rc._localOpenSource {
+				c.JSON(http.StatusOK, gin.H{
+					"status":  "not_applicable",
+					"mode":    "disabled",
+					"message": "Remote license registration is off; running in local/open-source mode (set LICENSE_MODE=remote to enable).",
+				})
+				return
+			}
+
 			if rc.IsActive() {
 				c.JSON(http.StatusOK, gin.H{
 					"status":  "active",
@@ -667,6 +737,15 @@ func LicenseRoutes(eng *gin.Engine, rc *RuntimeContext) {
 		})
 
 		lic.GET("/activate", func(c *gin.Context) {
+			if rc._localOpenSource {
+				c.JSON(http.StatusOK, gin.H{
+					"status":  "not_applicable",
+					"mode":    "disabled",
+					"message": "Remote activation is disabled. Use GLOBAL_API_KEY for API authentication.",
+				})
+				return
+			}
+
 			if rc.IsActive() {
 				c.JSON(http.StatusOK, gin.H{
 					"status":  "active",
@@ -738,6 +817,9 @@ func LicenseRoutes(eng *gin.Engine, rc *RuntimeContext) {
 }
 
 func StartHeartbeat(ctx context.Context, rc *RuntimeContext, startTime time.Time) {
+	if isLicenseRemoteDisabled() {
+		return
+	}
 	go func() {
 		ticker := time.NewTicker(hbInterval)
 		defer ticker.Stop()
@@ -760,7 +842,7 @@ func StartHeartbeat(ctx context.Context, rc *RuntimeContext, startTime time.Time
 }
 
 func Shutdown(rc *RuntimeContext) {
-	if rc == nil || rc._jpwr == "" {
+	if rc == nil || rc._jpwr == "" || rc._localOpenSource {
 		return
 	}
 	_uht(rc)
@@ -798,6 +880,9 @@ func _kc1(authCodeOrKey string) (string, error) {
 }
 
 func _2a2d(rc *RuntimeContext, _h7 string) error {
+	if isLicenseRemoteDisabled() {
+		return nil
+	}
 	resp, err := _rkb("/v1/activate", map[string]string{
 		"instance_id": rc._645,
 		"version":     _h7,
@@ -823,6 +908,9 @@ func _2a2d(rc *RuntimeContext, _h7 string) error {
 }
 
 func _b1h(rc *RuntimeContext, uptimeSeconds int64) error {
+	if isLicenseRemoteDisabled() {
+		return nil
+	}
 	resp, err := _rkb("/v1/heartbeat", map[string]any{
 		"instance_id":    rc._645,
 		"uptime_seconds": uptimeSeconds,
@@ -840,6 +928,9 @@ func _b1h(rc *RuntimeContext, uptimeSeconds int64) error {
 }
 
 func _uht(rc *RuntimeContext) {
+	if isLicenseRemoteDisabled() {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
